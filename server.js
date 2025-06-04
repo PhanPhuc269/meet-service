@@ -12,7 +12,10 @@ const wss = new WebSocket.Server({ server });
 // Simple in-memory room management
 const rooms = {};
 
+const { v4: uuidv4 } = require('uuid');
+
 wss.on('connection', (ws) => {
+  ws.id = uuidv4();
   ws.on('message', (message) => {
     let data;
     try {
@@ -21,22 +24,29 @@ wss.on('connection', (ws) => {
       ws.send(JSON.stringify({ error: 'Invalid JSON' }));
       return;
     }
-    const { type, room, payload } = data;
+    const { type, room, payload, to } = data;
     switch (type) {
       case 'join':
         if (!rooms[room]) rooms[room] = [];
-        rooms[room].push(ws);
         ws.room = room;
-        ws.send(JSON.stringify({ type: 'joined', room }));
+        rooms[room].push(ws);
+        // Gửi danh sách peerId hiện tại cho peer mới
+        const peerIds = rooms[room].filter(client => client !== ws).map(client => client.id);
+        ws.send(JSON.stringify({ type: 'joined', room, id: ws.id, peers: peerIds }));
+        // Thông báo cho các peer cũ về peer mới
+        rooms[room].forEach(client => {
+          if (client !== ws && client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({ type: 'new-peer', id: ws.id }));
+          }
+        });
         break;
       case 'signal':
-        // Broadcast signaling data to all peers in the room except sender
+        // Chỉ gửi signaling tới peer đích
         if (rooms[room]) {
-          rooms[room].forEach(client => {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({ type: 'signal', payload }));
-            }
-          });
+          const target = rooms[room].find(client => client.id === to);
+          if (target && target.readyState === WebSocket.OPEN) {
+            target.send(JSON.stringify({ type: 'signal', from: ws.id, payload }));
+          }
         }
         break;
       default:
@@ -48,6 +58,12 @@ wss.on('connection', (ws) => {
     const room = ws.room;
     if (room && rooms[room]) {
       rooms[room] = rooms[room].filter(client => client !== ws);
+      // Thông báo cho các peer còn lại về peer rời phòng
+      rooms[room].forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify({ type: 'peer-left', id: ws.id }));
+        }
+      });
       if (rooms[room].length === 0) delete rooms[room];
     }
   });
