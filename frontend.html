@@ -22,7 +22,7 @@
 
     async function joinRoom() {
       room = document.getElementById('room').value;
-      ws = new WebSocket('ws://' + location.hostname + ':3000');
+      ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
       ws.onopen = () => {
         ws.send(JSON.stringify({ type: 'join', room }));
       };
