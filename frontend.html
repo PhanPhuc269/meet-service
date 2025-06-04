@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Meet Service Demo</title>
+  <style>
+    body { font-family: Arial; margin: 2em; }
+    video { width: 300px; margin: 0 1em 1em 0; background: #222; }
+    #videos { display: flex; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+  <h1>Meet Service Demo</h1>
+  <input id="room" placeholder="Room name" />
+  <button onclick="joinRoom()">Join Room</button>
+  <div id="videos"></div>
+  <script>
+    let localStream;
+    let peers = {};
+    let ws;
+    let room;
+
+    async function joinRoom() {
+      room = document.getElementById('room').value;
+      ws = new WebSocket('ws://' + location.hostname + ':3000');
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'join', room }));
+      };
+      ws.onmessage = async (msg) => {
+        const data = JSON.parse(msg.data);
+        if (data.type === 'joined') {
+          await startLocal();
+        } else if (data.type === 'signal') {
+          handleSignal(data.payload);
+        }
+      };
+    }
+
+    async function startLocal() {
+      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      addVideo(localStream, 'local');
+      // For demo: auto-call when joined
+      call();
+    }
+
+    function call() {
+      const pc = createPeer();
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+      pc.createOffer().then(offer => {
+        pc.setLocalDescription(offer);
+        ws.send(JSON.stringify({ type: 'signal', room, payload: { sdp: offer } }));
+      });
+    }
+
+    function createPeer() {
+      const pc = new RTCPeerConnection();
+      pc.onicecandidate = e => {
+        if (e.candidate) {
+          ws.send(JSON.stringify({ type: 'signal', room, payload: { candidate: e.candidate } }));
+        }
+      };
+      pc.ontrack = e => {
+        addVideo(e.streams[0], 'remote');
+      };
+      return pc;
+    }
+
+    function handleSignal(payload) {
+      if (payload.sdp) {
+        const pc = createPeer();
+        pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+        pc.createAnswer().then(answer => {
+          pc.setLocalDescription(answer);
+          ws.send(JSON.stringify({ type: 'signal', room, payload: { sdp: answer } }));
+        });
+      } else if (payload.candidate) {
+        // Add ICE candidate to all peers
+        Object.values(peers).forEach(pc => pc.addIceCandidate(new RTCIceCandidate(payload.candidate)));
+      }
+    }
+
+    function addVideo(stream, id) {
+      if (document.getElementById('video-' + id)) return;
+      const video = document.createElement('video');
+      video.id = 'video-' + id;
+      video.autoplay = true;
+      video.playsInline = true;
+      video.srcObject = stream;
+      document.getElementById('videos').appendChild(video);
+    }
+  </script>
+</body>
+</html>
