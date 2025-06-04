@@ -73,14 +73,11 @@
           ws.send(JSON.stringify({ type: 'signal', room, to: peerId, payload: { candidate: e.candidate } }));
         }
       };
-      // Đảm bảo luôn gán stream cho video đúng peer
-      let remoteStream;
+      // Lưu remoteStream vào peers để đảm bảo mỗi peer chỉ có 1 MediaStream
+      let remoteStream = new MediaStream();
       pc.ontrack = e => {
-        if (!remoteStream) {
-          remoteStream = new MediaStream();
-          addVideo(remoteStream, peerId);
-        }
         remoteStream.addTrack(e.track);
+        addVideo(remoteStream, peerId);
       };
       return pc;
     }
